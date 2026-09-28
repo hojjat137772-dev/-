@@ -17,11 +17,15 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
 
-      - name: Install Android SDK
+      - name: Setup Android SDK
         run: |
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          yes | sdkmanager --licenses > /dev/null || true
           sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
       - name: Create Android project
@@ -84,7 +88,7 @@ jobs:
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.INTERNET"/>
 
               <application
                   android:allowBackup="true"
@@ -94,16 +98,15 @@ jobs:
 
                   <activity
                       android:name=".MainActivity"
-                      android:screenOrientation="portrait"
-                      android:exported="true">
+                      android:exported="true"
+                      android:screenOrientation="portrait">
 
                       <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
                       </intent-filter>
 
                   </activity>
-
               </application>
 
           </manifest>
@@ -114,7 +117,6 @@ jobs:
               <style name="AppTheme"
                   parent="Theme.AppCompat.Light.NoActionBar">
                   <item name="android:fontFamily">sans</item>
-                  <item name="android:windowLightStatusBar">false</item>
                   <item name="android:statusBarColor">#111827</item>
                   <item name="android:navigationBarColor">#111827</item>
               </style>
@@ -151,12 +153,10 @@ jobs:
                   settings.setDatabaseEnabled(true);
                   settings.setLoadWithOverviewMode(true);
                   settings.setUseWideViewPort(true);
-                  settings.setBuiltInZoomControls(false);
-                  settings.setDisplayZoomControls(false);
 
                   webView.setWebViewClient(new WebViewClient());
 
-                  webView.getSettings().setUserAgentString(
+                  settings.setUserAgentString(
                       settings.getUserAgentString()
                       + " IranStockAnalyzerAndroid/5.6.2"
                   );
@@ -177,11 +177,6 @@ jobs:
           }
           EOF
 
-      - name: Install Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
-
       - name: Build APK
         run: |
           gradle wrapper --gradle-version 8.9
@@ -193,3 +188,4 @@ jobs:
         with:
           name: IranStockAnalyzer-5.6.2-APK
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
