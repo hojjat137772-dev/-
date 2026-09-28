@@ -1,38 +1,154 @@
-name: Build Android APK
+name: Build Iran Stock Analyzer APK
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: Build Android APK
+    runs-on: ubuntu-24.04
 
     steps:
-      - name: Checkout repository
+
+      # -----------------------------
+      # 1. دریافت Repository
+      # -----------------------------
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup JDK 17
+
+      # -----------------------------
+      # 2. Java 17
+      # -----------------------------
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Gradle
+
+      # -----------------------------
+      # 3. پیدا کردن Android SDK
+      #    بدون setup-android
+      # -----------------------------
+      - name: Setup Android SDK
+        shell: bash
+        run: |
+
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME}}"
+
+          if [ -z "$SDK_ROOT" ]; then
+            SDK_ROOT="/usr/local/lib/android/sdk"
+          fi
+
+          echo "Using Android SDK: $SDK_ROOT"
+
+          if [ ! -d "$SDK_ROOT" ]; then
+            echo "Android SDK not found"
+            exit 1
+          fi
+
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+
+          CMDLINE_TOOLS="$SDK_ROOT/cmdline-tools/latest/bin"
+
+          if [ -d "$CMDLINE_TOOLS" ]; then
+            echo "$CMDLINE_TOOLS" >> "$GITHUB_PATH"
+          fi
+
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+
+          if [ -d "$SDK_ROOT/build-tools" ]; then
+            BUILD_TOOLS=$(find "$SDK_ROOT/build-tools" -maxdepth 1 -mindepth 1 -type d | sort -V | tail -1)
+
+            if [ -n "$BUILD_TOOLS" ]; then
+              echo "$BUILD_TOOLS" >> "$GITHUB_PATH"
+            fi
+          fi
+
+
+      # -----------------------------
+      # 4. پیدا کردن sdkmanager
+      # -----------------------------
+      - name: Find sdkmanager
+        shell: bash
+        run: |
+
+          SDK_ROOT="$ANDROID_SDK_ROOT"
+
+          SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" \
+            -type f \
+            -name "sdkmanager" \
+            2>/dev/null | head -1)
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "sdkmanager not found"
+            exit 1
+          fi
+
+          echo "SDKMANAGER=$SDKMANAGER"
+          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
+
+          "$SDKMANAGER" --version
+
+
+      # -----------------------------
+      # 5. نصب Android 35
+      # -----------------------------
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+
+      # -----------------------------
+      # 6. بررسی SDK
+      # -----------------------------
+      - name: Verify Android SDK
+        shell: bash
+        run: |
+
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+
+          adb version || true
+
+          "$SDKMANAGER" --list | head -40
+
+
+      # -----------------------------
+      # 7. نصب Gradle 8.9
+      # -----------------------------
+      - name: Setup Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Setup Android SDK
-        run: |
-          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
+      # -----------------------------
+      # 8. ساخت پروژه Android
+      # -----------------------------
       - name: Create Android project
+        shell: bash
         run: |
+
           mkdir -p app/src/main/java/com/iranstockanalyzer
           mkdir -p app/src/main/res/values
 
+
+          # settings.gradle
           cat > settings.gradle <<'EOF'
           pluginManagement {
               repositories {
@@ -44,6 +160,7 @@ jobs:
 
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+
               repositories {
                   google()
                   mavenCentral()
@@ -51,15 +168,20 @@ jobs:
           }
 
           rootProject.name = "IranStockAnalyzer"
+
           include(":app")
           EOF
 
+
+          # build.gradle
           cat > build.gradle <<'EOF'
           plugins {
               id 'com.android.application' version '8.7.3' apply false
           }
           EOF
 
+
+          # app/build.gradle
           cat > app/build.gradle <<'EOF'
           plugins {
               id 'com.android.application'
@@ -67,33 +189,43 @@ jobs:
 
           android {
               namespace 'com.iranstockanalyzer'
+
               compileSdk 35
 
               defaultConfig {
                   applicationId 'com.iranstockanalyzer'
+
                   minSdk 23
+
                   targetSdk 35
+
                   versionCode 562
+
                   versionName '5.6.2'
               }
           }
 
           dependencies {
               implementation 'androidx.appcompat:appcompat:1.7.0'
-              implementation 'androidx.webkit:webkit:1.12.1'
           }
           EOF
 
+
+          # AndroidManifest.xml
           cat > app/src/main/AndroidManifest.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-              <uses-permission android:name="android.permission.INTERNET"/>
+          <manifest
+              xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission
+                  android:name="android.permission.INTERNET" />
 
               <application
                   android:allowBackup="true"
                   android:label="تحلیل‌گر بورس ایران"
                   android:supportsRtl="true"
+                  android:usesCleartextTraffic="false"
                   android:theme="@style/AppTheme">
 
                   <activity
@@ -102,27 +234,50 @@ jobs:
                       android:screenOrientation="portrait">
 
                       <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
+
+                          <action
+                              android:name="android.intent.action.MAIN" />
+
+                          <category
+                              android:name="android.intent.category.LAUNCHER" />
+
                       </intent-filter>
 
                   </activity>
+
               </application>
 
           </manifest>
           EOF
 
+
+          # styles.xml
           cat > app/src/main/res/values/styles.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+
           <resources>
-              <style name="AppTheme"
-                  parent="Theme.AppCompat.Light.NoActionBar">
+
+              <style
+                  name="AppTheme"
+                  parent="android:style/Theme.Material.Light.NoActionBar">
+
                   <item name="android:fontFamily">sans</item>
-                  <item name="android:statusBarColor">#111827</item>
-                  <item name="android:navigationBarColor">#111827</item>
+
+                  <item name="android:windowLightStatusBar">false</item>
+
+                  <item name="android:statusBarColor">#07101F</item>
+
+                  <item name="android:navigationBarColor">#07101F</item>
+
+                  <item name="android:colorAccent">#16A34A</item>
+
               </style>
+
           </resources>
           EOF
 
+
+          # MainActivity.java
           cat > app/src/main/java/com/iranstockanalyzer/MainActivity.java <<'EOF'
           package com.iranstockanalyzer;
 
@@ -134,55 +289,132 @@ jobs:
 
           import androidx.appcompat.app.AppCompatActivity;
 
+
           public class MainActivity extends AppCompatActivity {
 
               private WebView webView;
 
+              private static final String APP_URL =
+                      "https://crypto-analyzer-online.onrender.com";
+
+
               @SuppressLint("SetJavaScriptEnabled")
               @Override
               protected void onCreate(Bundle savedInstanceState) {
+
                   super.onCreate(savedInstanceState);
 
                   webView = new WebView(this);
+
                   setContentView(webView);
 
-                  WebSettings settings = webView.getSettings();
+
+                  WebSettings settings =
+                          webView.getSettings();
+
 
                   settings.setJavaScriptEnabled(true);
+
                   settings.setDomStorageEnabled(true);
+
                   settings.setDatabaseEnabled(true);
+
+                  settings.setBuiltInZoomControls(false);
+
+                  settings.setDisplayZoomControls(false);
+
                   settings.setLoadWithOverviewMode(true);
+
                   settings.setUseWideViewPort(true);
 
-                  webView.setWebViewClient(new WebViewClient());
 
-                  settings.setUserAgentString(
-                      settings.getUserAgentString()
-                      + " IranStockAnalyzerAndroid/5.6.2"
+                  String userAgent =
+                          settings.getUserAgentString()
+                          + " IranStockAnalyzerAndroid/5.6.2";
+
+                  settings.setUserAgentString(userAgent);
+
+
+                  webView.setWebViewClient(
+                          new WebViewClient()
                   );
 
-                  webView.loadUrl(
-                      "https://crypto-analyzer-online.onrender.com"
-                  );
+
+                  webView.loadUrl(APP_URL);
               }
+
 
               @Override
               public void onBackPressed() {
-                  if (webView.canGoBack()) {
+
+                  if (webView != null &&
+                      webView.canGoBack()) {
+
                       webView.goBack();
+
                   } else {
+
                       super.onBackPressed();
                   }
               }
           }
           EOF
 
-      - name: Build APK
-        run: |
-          gradle wrapper --gradle-version 8.9
-          chmod +x gradlew
-          ./gradlew assembleDebug
 
+      # -----------------------------
+      # 9. بررسی فایل‌ها
+      # -----------------------------
+      - name: Verify Android project
+        shell: bash
+        run: |
+
+          echo "===== PROJECT ====="
+
+          find . -maxdepth 5 -type f | sort
+
+          echo "===== GRADLE ====="
+
+          gradle --version
+
+
+      # -----------------------------
+      # 10. Build APK
+      # -----------------------------
+      - name: Build Debug APK
+        shell: bash
+        run: |
+
+          gradle \
+            --no-daemon \
+            --stacktrace \
+            assembleDebug
+
+
+      # -----------------------------
+      # 11. بررسی APK
+      # -----------------------------
+      - name: Verify APK
+        shell: bash
+        run: |
+
+          echo "===== APK FILES ====="
+
+          find app/build/outputs \
+            -type f \
+            -name "*.apk" \
+            -print
+
+          if [ ! -f app/build/outputs/apk/debug/app-debug.apk ]; then
+            echo "APK was not created"
+            exit 1
+          fi
+
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
+
+
+      # -----------------------------
+      # 12. تحویل APK
+      # -----------------------------
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
